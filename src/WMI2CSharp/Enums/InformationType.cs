@@ -1,0 +1,38 @@
+﻿namespace WMI2CSharp.Enums
+{
+    public enum InformationType
+    {
+        All,
+        BaseBoard,
+        BIOS,
+        ComputerSystem,
+        DataFiles,
+        Desktops,
+        Disks,
+        DiskDrives,
+        DiskPartitions,
+        Environments,
+        LocalTime,
+        MappedDisks,
+        NetworkAdapters,
+        NetworkAdapterConfigurations,
+        OperatingSystem,
+        PhysicalMemories,
+        PNPEntities,
+        PNPSignedDrivers,
+        Printers,
+        PrinterConfigurations,
+        Processes,
+        Processor,
+        Products,
+        QuickFixEngineerings,
+        SerialPorts,
+        SerialPortConfigurations,
+        Services,
+        SoftwareLicensingService,
+        TimeZone,
+        VideoControllers,
+        Volumes,
+        WindowsScore
+    }
+}
