@@ -33,6 +33,7 @@
         TimeZone,
         VideoControllers,
         Volumes,
-        WindowsScore
+        WindowsScore,
+        Directories
     }
 }

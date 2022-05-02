@@ -13,6 +13,7 @@
         Network,
         Configuration,
         PNP,
-        DataFiles
+        DataFiles,
+        Directories
     }
 }

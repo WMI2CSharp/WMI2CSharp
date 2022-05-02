@@ -31,11 +31,11 @@ namespace WMI2CSharp.Services
         /// </summary>
         /// <param name="wmiClass">To query with WMI on EndPoint.</param>
         /// <returns>Returns awaitable Task with ManagementBaseObject.</returns>
-        public async Task<ManagementBaseObject> TryQueryAsync(string wmiClass, string wmiWhereClause, CancellationToken cancellationToken)
+        public async Task<ManagementBaseObject> TryQueryAsync(string wmiSelect, string wmiClass, string wmiWhereClause, CancellationToken cancellationToken)
         {
             try
             {
-                var objectCollection = await TryGetObjectCollectionAsync(wmiClass, wmiWhereClause, cancellationToken).ConfigureAwait(false);
+                var objectCollection = await TryGetObjectCollectionAsync(wmiSelect, wmiClass, wmiWhereClause, cancellationToken).ConfigureAwait(false);
                 if (objectCollection is ManagementObjectCollection managementObjectCollection)
                 {
                     foreach (var managementObject in managementObjectCollection)
@@ -60,19 +60,31 @@ namespace WMI2CSharp.Services
         /// </summary>
         /// <param name="wmiClass">To query with WMI on EndPoint.</param>
         /// <returns>Returns awaitable Task with IEnumerable of ManagementBaseObject.</returns>
-        public async Task<IEnumerable<ManagementBaseObject>> TryQueryCollectionAsync(string wmiClass, string wmiWhereClause, CancellationToken cancellationToken)
+        public async Task<IEnumerable<ManagementBaseObject>> TryQueryCollectionAsync(string wmiSelect, string wmiClass, string wmiWhereClause, CancellationToken cancellationToken)
         {
             var objectList = new List<ManagementBaseObject>();
             try
             {
-                var objectCollection = await TryGetObjectCollectionAsync(wmiClass, wmiWhereClause, cancellationToken).ConfigureAwait(false);
+                var objectCollection = await TryGetObjectCollectionAsync(wmiSelect, wmiClass, wmiWhereClause, cancellationToken).ConfigureAwait(false);
                 if (objectCollection is ManagementObjectCollection managementObjectCollection)
                 {
                     foreach (var managementObject in managementObjectCollection)
                     {
-                        if (managementObject is ManagementBaseObject managementBaseObject)
+                        try
                         {
-                            objectList.Add(managementBaseObject);
+                            if (cancellationToken.IsCancellationRequested)
+                            {
+                                return objectList;
+                            }
+
+                            if (managementObject is ManagementBaseObject managementBaseObject)
+                            {
+                                objectList.Add(managementBaseObject);
+                            }
+                        }
+                        catch (Exception exception)
+                        {
+                            LogException(exception);
                         }
                     }
                 }
@@ -156,7 +168,7 @@ namespace WMI2CSharp.Services
             }).ConfigureAwait(false);
         }
 
-        private async Task<ManagementObjectCollection> TryGetObjectCollectionAsync(string wmiClass, string wmiWhereClause, CancellationToken cancellationToken)
+        private async Task<ManagementObjectCollection> TryGetObjectCollectionAsync(string wmiSelect, string wmiClass, string wmiWhereClause, CancellationToken cancellationToken)
         {
             return await Task.Run(() =>
             {
@@ -166,7 +178,7 @@ namespace WMI2CSharp.Services
                     if (Connected)
                     {
                         var wmiWhere = string.IsNullOrEmpty(wmiWhereClause) ? string.Empty : wmiWhereClause;
-                        var objectQuery = new ObjectQuery($"SELECT * FROM {wmiClass} {wmiWhere}");
+                        var objectQuery = new ObjectQuery($"SELECT {wmiSelect} FROM {wmiClass} {wmiWhere}");
                         var objectSearcher = new ManagementObjectSearcher(_managementScope, objectQuery);
                         var objectCollection = objectSearcher.Get();
                         return objectCollection;
@@ -201,23 +213,30 @@ namespace WMI2CSharp.Services
 
         private void LogException(Exception exception)
         {
-            var data = string.Empty;
-            if (exception is ManagementException managementException)
+            try
             {
-                var parameterInfo = managementException.ErrorInformation.Properties["ParameterInfo"].Value.ToString();
-                if (!string.IsNullOrEmpty(parameterInfo))
+                var data = string.Empty;
+                if (exception is ManagementException managementException)
                 {
-                    data += parameterInfo;
+                    var parameterInfo = managementException?.ErrorInformation?.Properties["ParameterInfo"]?.Value?.ToString();
+                    if (!string.IsNullOrEmpty(parameterInfo))
+                    {
+                        data += parameterInfo;
+                    }
                 }
-            }
 
-            if (string.IsNullOrEmpty(data))
+                if (string.IsNullOrEmpty(data))
+                {
+                    data = exception.Message;
+                }
+
+                var wmiException = new WMIGeneralException(EndPoint, data, exception);
+                LogEventHandler.Exception(wmiException);
+            }
+            catch (Exception)
             {
-                data = exception.Message;
+                //ignore
             }
-
-            var wmiException = new WMIGeneralException(EndPoint, data, exception);
-            LogEventHandler.Exception(wmiException);
         }
     }
 }

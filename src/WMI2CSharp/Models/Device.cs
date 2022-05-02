@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Management;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using WMI2CSharp.Attributes;
@@ -45,6 +46,9 @@ namespace WMI2CSharp.Models
 
         [InformationCategory(InformationCategory.DataFiles)]
         public ICollection<DataFile> DataFiles { get; set; } = new List<DataFile>();
+
+        [InformationCategory(InformationCategory.Directories)]
+        public ICollection<Directory> Directories { get; set; } = new List<Directory>();
 
         [InformationCategory(InformationCategory.User, InformationCategory.System)]
         public ICollection<Desktop> Desktops { get; set; } = new List<Desktop>();
@@ -356,7 +360,8 @@ namespace WMI2CSharp.Models
         {
             return (InformationCategorySelected(memberInfo) ||
                    InformationTypeSelected(memberInfo)) &&
-                   IsDataFilesSelectedWithoutWhere(memberInfo);
+                   IsDataFilesSelectedWithoutWhere(memberInfo) &&
+                   IsDirectoriesSelectedWithoutWhere(memberInfo);
         }
 
         private bool IsDataFilesSelectedWithoutWhere(MemberInfo memberInfo)
@@ -372,6 +377,25 @@ namespace WMI2CSharp.Models
                     var shouldFetchDataFiles = informationTypeParsed && informationType != InformationType.DataFiles ||
                                                Queries.Any(x => x.InformationType == InformationType.DataFiles);
                     return shouldFetchDataFiles;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsDirectoriesSelectedWithoutWhere(MemberInfo memberInfo)
+        {
+            if (InformationTypes != null || InformationCategories != null)
+            {
+                var typeName = memberInfo?.Name;
+                var informationTypeParsed = Enum.TryParse(typeName, out InformationType informationType);
+
+                if ((InformationTypes == null || !InformationTypes.Contains(InformationType.All) || !InformationTypes.Contains(InformationType.Directories)) ||
+                    (InformationCategories == null || !InformationCategories.Contains(InformationCategory.Directories)) || !InformationCategories.Contains(InformationCategory.All))
+                {
+                    var shouldFetchDirectories = informationTypeParsed && informationType != InformationType.Directories ||
+                                               Queries.Any(x => x.InformationType == InformationType.Directories);
+                    return shouldFetchDirectories;
                 }
             }
 
@@ -428,6 +452,7 @@ namespace WMI2CSharp.Models
         {
             if (_wmiAccessService != null)
             {
+                var select = CreateSelectClause(propertyInfo);
                 var wheres = Queries.Where(x => x.InformationType.ToString() == propertyInfo.Name).Select(x => x.Where);
                 if (wheres.Any())
                 {
@@ -437,21 +462,48 @@ namespace WMI2CSharp.Models
                         tasks.Add(Task.Run(async () =>
                         {
                             var whereClause = CreateWhereClause(where);
-                            await FetchAndMapObjectAsync(propertyInfo, wmiClassName, whereClause, cancellationToken).ConfigureAwait(false);
+                            await FetchAndMapObjectAsync(propertyInfo, select, wmiClassName, whereClause, cancellationToken).ConfigureAwait(false);
                         }, cancellationToken));
                     }
                     await Task.WhenAll(tasks).ConfigureAwait(false);
                 }
                 else
                 {
-                    await FetchAndMapObjectAsync(propertyInfo, wmiClassName, string.Empty, cancellationToken).ConfigureAwait(false);
+                    await FetchAndMapObjectAsync(propertyInfo, select, wmiClassName, string.Empty, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
 
-        private async Task FetchAndMapObjectAsync(PropertyInfo propertyInfo, string wmiClassName, string whereClause, CancellationToken cancellationToken)
+        private string CreateSelectClause(PropertyInfo propertyInfo)
         {
-            var managementBaseObject = await (_wmiAccessService?.TryQueryAsync(wmiClassName, whereClause, cancellationToken)).ConfigureAwait(false);
+            var sb = new StringBuilder();
+
+            var propertyType = propertyInfo.PropertyType;
+            var isCollection = IsCollection(propertyType);
+            propertyType = SetPropertyType(isCollection, propertyType);
+            var properties = propertyType.GetProperties();
+            for (var i = 0; i < properties.Length; i++)
+            {
+                var property = properties[i];
+                if (i + 1 == properties.Length)
+                {
+                    sb.Append(property.Name);
+                }
+                else
+                {
+                    sb.Append(property.Name).Append(',');
+                }
+            }
+
+            var result = sb.ToString();
+            return result.Length > 200
+                    ? "*"
+                    : result;
+        }
+
+        private async Task FetchAndMapObjectAsync(PropertyInfo propertyInfo, string wmiSelect, string wmiClassName, string whereClause, CancellationToken cancellationToken)
+        {
+            var managementBaseObject = await (_wmiAccessService?.TryQueryAsync(wmiSelect, wmiClassName, whereClause, cancellationToken)).ConfigureAwait(false);
             var obj = await TryMapObjectAsync(managementBaseObject, propertyInfo?.PropertyType).ConfigureAwait(false);
             propertyInfo?.SetValue(this, obj);
         }
@@ -460,6 +512,7 @@ namespace WMI2CSharp.Models
         {
             if (_wmiAccessService != null)
             {
+                var select = CreateSelectClause(propertyInfo);
                 var wheres = Queries.Where(x => x.InformationType.ToString() == propertyInfo.Name).Select(x => x.Where);
                 if (wheres.Any())
                 {
@@ -469,21 +522,21 @@ namespace WMI2CSharp.Models
                         tasks.Add(Task.Run(async () =>
                         {
                             var whereClause = CreateWhereClause(where);
-                            await FetchAndMapCollectionAsync(propertyInfo, propertyType, wmiClassName, whereClause, cancellationToken).ConfigureAwait(false);
+                            await FetchAndMapCollectionAsync(propertyInfo, propertyType, select, wmiClassName, whereClause, cancellationToken).ConfigureAwait(false);
                         }, cancellationToken));
                     }
                     await Task.WhenAll(tasks).ConfigureAwait(false);
                 }
                 else
                 {
-                    await FetchAndMapCollectionAsync(propertyInfo, propertyType, wmiClassName, string.Empty, cancellationToken).ConfigureAwait(false);
+                    await FetchAndMapCollectionAsync(propertyInfo, propertyType, select, wmiClassName, string.Empty, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
 
-        private async Task FetchAndMapCollectionAsync(PropertyInfo propertyInfo, Type propertyType, string wmiClassName, string whereClause, CancellationToken cancellationToken)
+        private async Task FetchAndMapCollectionAsync(PropertyInfo propertyInfo, Type propertyType, string wmiSelect, string wmiClassName, string whereClause, CancellationToken cancellationToken)
         {
-            var managementBaseObjects = await (_wmiAccessService?.TryQueryCollectionAsync(wmiClassName, whereClause, cancellationToken)).ConfigureAwait(false);
+            var managementBaseObjects = await _wmiAccessService?.TryQueryCollectionAsync(wmiSelect, wmiClassName, whereClause, cancellationToken);
             foreach (var managementBaseObject in managementBaseObjects)
             {
                 var obj = await TryMapObjectAsync(managementBaseObject, propertyType).ConfigureAwait(false);
@@ -498,15 +551,21 @@ namespace WMI2CSharp.Models
             var objectInstance = Activator.CreateInstance(propertyType);
             var objectInstanceName = objectInstance?.GetType().Name;
 
-            if (objectInstance != null)
+            if (objectInstance != null && managementBaseObject != null && managementBaseObject.Properties.Count > 0)
             {
+                var managementObjectProperties = new List<PropertyData>();
+                foreach (var propertyData in managementBaseObject?.Properties)
+                {
+                    managementObjectProperties.Add(propertyData);
+                }
+
                 foreach (var propertyInfo in objectInstance.GetType().GetProperties())
                 {
                     tasks.Add(Task.Run(() =>
                     {
                         try
                         {
-                            var propertyData = managementBaseObject?.Properties[propertyInfo.Name];
+                            var propertyData = managementObjectProperties.FirstOrDefault(x => x.Name == propertyInfo.Name);
                             if (!(propertyData is null))
                             {
                                 TrySetValue(objectInstance, propertyInfo, propertyData);
